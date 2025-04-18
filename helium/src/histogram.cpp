@@ -16,8 +16,9 @@ void Histogram::writeToFile(const std::string& filename) const {
     std::ofstream fout(filename);
     if (!fout) throw std::runtime_error("Unable to open histogram file");
     for (size_t i = 1; i <= num_bins_; ++i) {
-        //double bin_center = (i + 0.5) * bin_size_;
-        double bin_center = i * bin_size_;
+        double bin_center = (i + 0.5) * bin_size_;
+        //double bin_center = i * bin_size_;
         fout << bin_center << " " << bins_[i] << "\n";
     }
+    fout.close();
 }

@@ -4,6 +4,8 @@
 #include <sstream>
 #include <omp.h>
 #include <tuple>
+#include <filesystem>
+#include <fstream>
 
 void printInfo(const std::string &message)
 {
@@ -94,3 +96,38 @@ void writeFinalResultsToFile(DataFile* result_file,
     result_file->write_line("E_error_etrial: " + std::to_string(E_error_etrial));
     result_file->write_line("E_final_etrial: " + std::to_string(E_mean_etrial) + " ± " + std::to_string(E_error_etrial));
 }
+
+
+void snapshot_walker_positions(const std::vector<Walker> &walkers, double time, bool isProduction)
+{
+    // Určení složky podle přepínače isProduction
+    std::string folder = isProduction ? "production" : "equilibration";
+
+    // Vytvoření složky, pokud neexistuje
+    if (!std::filesystem::exists(folder))
+    {
+        std::filesystem::create_directory(folder); // Pokud složka neexistuje, vytvoří ji
+    }
+
+    // Vytvoření názvu souboru podle času
+    std::ostringstream filename;
+    filename << folder << "/walker_snapshot_" << std::setfill('0') << std::setw(2) << static_cast<int>(time) << ".dat";
+
+    // Otevření souboru pro zápis
+    std::ofstream file(filename.str(), std::ios::trunc);
+
+    if (!file.is_open())
+    {
+        throw std::runtime_error("Chyba při otevírání souboru pro zápis.");
+    }
+
+    // Zápis pozic walkerů do souboru
+    for (size_t i = 0; i < walkers.size(); i++)
+    {
+        file << walkers[i].e1.x << " " << walkers[i].e1.y << " " << walkers[i].e1.z << " ";
+        file << walkers[i].e2.x << " " << walkers[i].e2.y << " " << walkers[i].e2.z << "\n";
+    }
+
+    // Soubor je automaticky zavřený při destrukci objektu 'file'
+}
+

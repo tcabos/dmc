@@ -2,6 +2,7 @@
 #define UTILS_HPP
 
 #include "data_file.hpp"
+#include "walker.hpp"
 #include <string>
 #include <tuple>
 #include <chrono>
@@ -28,4 +29,5 @@ void writeFinalResultsToFile(DataFile *result_file,
 std::tuple<int, int, int> calculateDuration(
     std::chrono::high_resolution_clock::time_point start,
     std::chrono::high_resolution_clock::time_point end);
+void snapshot_walker_positions(const std::vector<Walker> &walkers, double time, bool isProduction);
 #endif // UTILS_HPP

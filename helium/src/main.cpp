@@ -2,6 +2,8 @@
 #include "data_file.hpp"
 #include "utils.hpp"
 #include "vec3.hpp"
+#include "histogram.hpp"
+#include "walker.hpp"
 
 #include <random>
 #include <iostream>
@@ -12,12 +14,6 @@
 #include <memory>
 #include <sstream>
 
-struct Walker
-{
-    Vec3 e1;
-    Vec3 e2;
-    Walker(const Vec3 &e1_ = Vec3(), const Vec3 &e2_ = Vec3()) : e1(e1_), e2(e2_) {}
-};
 
 void initialize_walkers(std::vector<Walker> &walkers, size_t target_size)
 {
@@ -36,6 +32,10 @@ void initialize_walkers(std::vector<Walker> &walkers, size_t target_size)
         walkers[i].e2.y = uniform(gen);
         walkers[i].e2.z = uniform(gen);
     }
+
+    #ifdef SNAPSHOT_WALKERS_START_END
+    snapshot_walker_positions(walkers, 0, true);
+    #endif
 }
 
 inline double potential(Walker &walker, double rc, double Z)
@@ -63,30 +63,47 @@ void simulate(double _tau = 0.01, double _sim_time = 1000, size_t _n_target = 10
     const size_t m_max = 10;
     const double c_param = 0.1 / tau;
     double e_trial = -2.17;
+    std::random_device rd;
 
-
+    //------------------------------------------------------------------------------
+    // Containers
+    //------------------------------------------------------------------------------
     std::vector<Walker> walkers;
     std::vector<Walker> temp_walkers;
-
     std::vector<double> block_local_energies;
     std::vector<double> tmp_local_energies;
-
     std::vector<double> block_etrial_energies;
     std::vector<double> tmp_etrial_energies;
-
     std::vector<double> local_energies;
+    //------------------------------------------------------------------------------
 
+    //------------------------------------------------------------------------------
+    // Data files
+    //------------------------------------------------------------------------------
+    #ifdef WRITE_STEP_ENERGY_FILE
     std::unique_ptr<DataFile> stats_file;
+    stats_file = std::make_unique<DataFile>("running.dat", 1000);
+    #endif
+
+    #ifdef WRITE_BLOCK_FILE
+    std::unique_ptr<DataFile> block_file;
+    block_file = std::make_unique<DataFile>("block.dat", 1);
+    #endif
+
+    #ifdef WRITE_CUMUL_BLOCK_FILES
     std::unique_ptr<DataFile> block_energy_file;
     std::unique_ptr<DataFile> block_etrial_file;
-    std::unique_ptr<DataFile> result_file;
-    std::unique_ptr<DataFile> running_block_file;
-
-    stats_file = std::make_unique<DataFile>("running.dat", 1000);
     block_energy_file = std::make_unique<DataFile>("block_energy.dat", 100);
     block_etrial_file = std::make_unique<DataFile>("block_etrial.dat", 100);
-    result_file = std::make_unique<DataFile>("result.dat", 100);
-    running_block_file = std::make_unique<DataFile>("running_block.dat", 1);
+    #endif
+
+    #ifdef HISTOGRAM
+    Histogram histogram_radial(0.01, 10);
+    #endif
+
+    std::unique_ptr<DataFile> result_file;
+    result_file = std::make_unique<DataFile>("result.dat", 1);
+    //------------------------------------------------------------------------------
 
     walkers.reserve(n_target * 3);
     temp_walkers.reserve(n_target * 3);
@@ -105,7 +122,6 @@ void simulate(double _tau = 0.01, double _sim_time = 1000, size_t _n_target = 10
 
 #pragma omp parallel
         {
-            std::random_device rd;
             std::mt19937 gen(rd());
             std::normal_distribution<> thread_gauss(0.0, 1.0);
             std::uniform_real_distribution<double> thread_uniform(0.0, 1.0);
@@ -180,21 +196,31 @@ void simulate(double _tau = 0.01, double _sim_time = 1000, size_t _n_target = 10
         {
             if (current_time < 0)
             {
+                #ifdef PRINT_BLOCK_DATA_TO_CONSOLE
                 std::ostringstream ss;
                 ss << "Time " << current_time << " au (equilibration): N_walkers = " << current_N
                    << ", E = " << average_local_energy << ", E_trial = " << e_trial << "\n";
 
                 std::cout << ss.str();
-                running_block_file->write_line(ss.str());
+                #endif
+
+                #ifdef SNAPSHOT_WALKERS_EQUILIBRATION
+                snapshot_walker_positions(walkers, current_time, false);
+                #endif
             }
             else
             {
+                #ifdef PRINT_BLOCK_DATA_TO_CONSOLE
                 std::ostringstream ss;
                 ss << "Time " << current_time << " au: N_walkers = " << current_N
                    << ", E = " << average_local_energy << ", E_trial = " << e_trial << "\n";
 
                 std::cout << ss.str();
-                running_block_file->write_line(ss.str());
+                #endif
+
+                #ifdef SNAPSHOT_WALKERS_PRODUCTION
+                snapshot_walker_positions(walkers, current_time, true);
+                #endif
             }
         }
 
@@ -211,6 +237,11 @@ void simulate(double _tau = 0.01, double _sim_time = 1000, size_t _n_target = 10
                 block_local_energies.push_back(block_avg_energy);
                 block_etrial_energies.push_back(block_avg_Etrial);
 
+                #ifdef WRITE_BLOCK_FILE
+                block_file->write_numbers(std::vector<double>{current_time , block_avg_energy, block_avg_Etrial});
+                #endif
+
+                #ifdef WRITE_CUMUL_BLOCK_FILES
                 block_energy_file->write_numbers(std::vector<double>{
                     block_avg_energy,
                     Statistics::mean(block_local_energies),
@@ -222,13 +253,25 @@ void simulate(double _tau = 0.01, double _sim_time = 1000, size_t _n_target = 10
                     Statistics::mean(block_etrial_energies),
                     Statistics::stddev(block_etrial_energies),
                     Statistics::stderr(block_etrial_energies)});
+                #endif
+                
+                #ifdef HISTOGRAM
+                for (size_t i = 0; i < current_N; i++)
+                {
+                    histogram_radial.add(walkers[i].e1.norm());
+                    histogram_radial.add(walkers[i].e2.norm());
+                }
+                #endif
+                
 
                 tmp_local_energies.clear();
                 tmp_etrial_energies.clear();
             }
         }
 
-        //stats_file->write_numbers(std::vector<double>{current_time, (double)current_N, average_local_energy, e_trial});
+        #ifdef WRITE_STEP_ENERGY_FILE
+        stats_file->write_numbers(std::vector<double>{current_time, (double)current_N, average_local_energy, e_trial});
+        #endif
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -259,10 +302,27 @@ void simulate(double _tau = 0.01, double _sim_time = 1000, size_t _n_target = 10
             hours, minutes, seconds);
 
         result_file->flush();
+
+        #ifdef WRITE_STEP_ENERGY_FILE
         stats_file->flush();
+        #endif
+
+        #ifdef WRITE_BLOCK_FILE
+        block_file->flush();
+        #endif
+
+        #ifdef WRITE_CUMUL_BLOCK_FILES
         block_energy_file->flush();
         block_etrial_file->flush();
-        running_block_file->flush();
+        #endif
+
+        #ifdef HISTOGRAM
+        histogram_radial.writeToFile("histogram_radial.dat");
+        #endif
+
+        #ifdef SNAPSHOT_WALKERS_START_END
+        snapshot_walker_positions(walkers, sim_time, true);
+        #endif
 
         std::cout << "\nSimulation completed successfully. Data written to files.\n";
     }
