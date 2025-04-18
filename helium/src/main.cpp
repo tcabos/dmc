@@ -9,6 +9,8 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <memory>
+#include <sstream>
 
 struct Walker
 {
@@ -17,7 +19,7 @@ struct Walker
     Walker(const Vec3 &e1_ = Vec3(), const Vec3 &e2_ = Vec3()) : e1(e1_), e2(e2_) {}
 };
 
-void initializeWalkers(std::vector<Walker> &walkers, size_t target_size)
+void initialize_walkers(std::vector<Walker> &walkers, size_t target_size)
 {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -48,12 +50,12 @@ inline double potential(Walker &walker, double rc, double Z)
     return V1 + V2 + (1.0 / r12);
 }
 
-void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 10000, int flag_type_simul = 0)
+void simulate(double _tau = 0.01, double _sim_time = 1000, size_t _n_target = 10000, int flag_type_simul = 0)
 {
     const size_t n_target = _n_target;
     const double tau = _tau;
     const double sim_time = _sim_time;
-    const double eq_time = 100;
+    const double eq_time = 30;
     const size_t block_size = static_cast<size_t>(1.0 / tau);
     const size_t n_steps = static_cast<size_t>((sim_time + eq_time) / tau);
     const double Z = 2.0;
@@ -61,6 +63,7 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
     const size_t m_max = 10;
     const double c_param = 0.1 / tau;
     double e_trial = -2.17;
+
 
     std::vector<Walker> walkers;
     std::vector<Walker> temp_walkers;
@@ -77,16 +80,18 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
     std::unique_ptr<DataFile> block_energy_file;
     std::unique_ptr<DataFile> block_etrial_file;
     std::unique_ptr<DataFile> result_file;
+    std::unique_ptr<DataFile> running_block_file;
 
     stats_file = std::make_unique<DataFile>("running.dat", 1000);
     block_energy_file = std::make_unique<DataFile>("block_energy.dat", 100);
     block_etrial_file = std::make_unique<DataFile>("block_etrial.dat", 100);
     result_file = std::make_unique<DataFile>("result.dat", 100);
+    running_block_file = std::make_unique<DataFile>("running_block.dat", 1);
 
     walkers.reserve(n_target * 3);
     temp_walkers.reserve(n_target * 3);
 
-    initializeWalkers(walkers, n_target);
+    initialize_walkers(walkers, n_target);
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -108,10 +113,7 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
             std::vector<Walker> thread_walkers;
             std::vector<double> thread_walkers_local_energies;
 
-            thread_walkers.reserve(100);
-            thread_walkers_local_energies.reserve(100);
-
-#pragma omp for schedule(dynamic, 100) nowait
+#pragma omp for schedule(dynamic, 200) nowait
             for (size_t i = 0; i < current_N; i++)
             {
                 Walker old_walker = walkers[i];
@@ -125,11 +127,11 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
 
                 Walker new_walker = walkers[i];
 
-                if(flag_type_simul == 1)
+                if (flag_type_simul == 1)
                 {
                     double delta_old = old_walker.e1.norm() - old_walker.e2.norm();
                     double delta_new = new_walker.e1.norm() - new_walker.e2.norm();
-    
+
                     if (delta_old * delta_new < 0.0)
                         continue;
                 }
@@ -153,14 +155,11 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
 
 #pragma omp critical
             {
-
                 temp_walkers.insert(temp_walkers.end(), thread_walkers.begin(), thread_walkers.end());
                 thread_walkers.clear();
-                thread_walkers.reserve(100);
 
                 local_energies.insert(local_energies.end(), thread_walkers_local_energies.begin(), thread_walkers_local_energies.end());
                 thread_walkers_local_energies.clear();
-                thread_walkers_local_energies.reserve(100);
             }
         }
 
@@ -181,13 +180,21 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
         {
             if (current_time < 0)
             {
-                std::cout << "Time " << current_time << " au (equilibration): N_walkers = " << current_N
-                          << ", E = " << average_local_energy << ", E_trial = " << e_trial << "\n";
+                std::ostringstream ss;
+                ss << "Time " << current_time << " au (equilibration): N_walkers = " << current_N
+                   << ", E = " << average_local_energy << ", E_trial = " << e_trial << "\n";
+
+                std::cout << ss.str();
+                running_block_file->write_line(ss.str());
             }
             else
             {
-                std::cout << "Time " << current_time << " au: N_walkers = " << current_N
-                          << ", E = " << average_local_energy << ", E_trial = " << e_trial << "\n";
+                std::ostringstream ss;
+                ss << "Time " << current_time << " au: N_walkers = " << current_N
+                   << ", E = " << average_local_energy << ", E_trial = " << e_trial << "\n";
+
+                std::cout << ss.str();
+                running_block_file->write_line(ss.str());
             }
         }
 
@@ -205,29 +212,28 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
                 block_etrial_energies.push_back(block_avg_Etrial);
 
                 block_energy_file->write_numbers(std::vector<double>{
-                    block_avg_energy, 
-                    Statistics::mean(block_local_energies), 
-                    Statistics::stddev(block_local_energies), 
-                    Statistics::stderr(block_local_energies)
-                });
+                    block_avg_energy,
+                    Statistics::mean(block_local_energies),
+                    Statistics::stddev(block_local_energies),
+                    Statistics::stderr(block_local_energies)});
 
                 block_etrial_file->write_numbers(std::vector<double>{
-                    block_avg_Etrial, 
-                    Statistics::mean(block_etrial_energies), 
-                    Statistics::stddev(block_etrial_energies), 
-                    Statistics::stderr(block_etrial_energies)
-                });
+                    block_avg_Etrial,
+                    Statistics::mean(block_etrial_energies),
+                    Statistics::stddev(block_etrial_energies),
+                    Statistics::stderr(block_etrial_energies)});
 
                 tmp_local_energies.clear();
                 tmp_etrial_energies.clear();
             }
         }
 
-        stats_file->write_numbers(std::vector<double>{current_time, (double)current_N, average_local_energy, e_trial});
+        //stats_file->write_numbers(std::vector<double>{current_time, (double)current_N, average_local_energy, e_trial});
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();
-    auto [hours, minutes, seconds] = calculateDuration(start_time, end_time);
+    int hours, minutes, seconds;
+    std::tie(hours, minutes, seconds) = calculateDuration(start_time, end_time);
 
     if (!block_local_energies.empty())
     {
@@ -244,18 +250,19 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
         std::cout << "<E> = " << E_mean << " ± " << E_error << " , " << E_stddev << std::endl;
         std::cout << "<E_trial> = " << Et_mean << " ± " << Et_error << " , " << Et_stddev << std::endl;
         std::cout << "Simulation time: " << getFormattedTime(hours, minutes, seconds) << std::endl;
-        
+
         writeFinalResultsToFile(
-            result_file.get(), tau, sim_time, eq_time, 
-            block_size, n_steps, n_target, 
-            E_mean, E_stddev, E_error, 
-            Et_mean, Et_stddev, Et_error, 
+            result_file.get(), tau, sim_time, eq_time,
+            block_size, n_steps, n_target,
+            E_mean, E_stddev, E_error,
+            Et_mean, Et_stddev, Et_error,
             hours, minutes, seconds);
 
         result_file->flush();
         stats_file->flush();
         block_energy_file->flush();
         block_etrial_file->flush();
+        running_block_file->flush();
 
         std::cout << "\nSimulation completed successfully. Data written to files.\n";
     }
@@ -265,13 +272,12 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
     }
 }
 
-
 int main(int argc, char const *argv[])
 {
-    double tau = 0.001;
+    double tau = 0.01;
     double n_target = 10000;
     double sim_time = 100;
-    int flag_simul_type = 0; 
+    int flag_simul_type = 0;
 
     if (argc >= 2)
         tau = std::stod(argv[1]);
@@ -285,4 +291,3 @@ int main(int argc, char const *argv[])
     simulate(tau, sim_time, n_target, flag_simul_type);
     return 0;
 }
-

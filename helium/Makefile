@@ -1,6 +1,6 @@
 # Compiler and flags
 CC = g++
-CFLAGS = -std=c++20 -Wall -Wextra -fopenmp -O3 -march=native -ffast-math
+CFLAGS = -std=c++17 -static-libstdc++ -static-libgcc -O3 -Wall -Wextra -ffast-math -fopenmp
 
 # Directories
 SRC_DIR = src

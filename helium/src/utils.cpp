@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <sstream>
 #include <omp.h>
+#include <tuple>
 
 void printInfo(const std::string &message)
 {

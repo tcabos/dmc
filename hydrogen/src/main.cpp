@@ -49,7 +49,7 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
     const double Z = 1;
     const double D = std::sqrt(tau);
     const size_t m_max = 10;
-    const double c_param = 0.1 / tau;
+    const double c_param = 1 / tau;
     double e_trial = 0.0;
 
     std::vector<Walker> walkers;
@@ -67,11 +67,13 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
     std::unique_ptr<DataFile> block_energy_file;
     std::unique_ptr<DataFile> block_etrial_file;
     std::unique_ptr<DataFile> result_file;
+    std::unique_ptr<DataFile> sigma_file;
 
     stats_file = std::make_unique<DataFile>("running.dat", 1000);
     block_energy_file = std::make_unique<DataFile>("block_energy.dat", 100);
     block_etrial_file = std::make_unique<DataFile>("block_etrial.dat", 100);
     result_file = std::make_unique<DataFile>("result.dat", 100);
+    sigma_file = std::make_unique<DataFile>("sigma.dat", 1000);
 
     walkers.reserve(n_target * 3);
     temp_walkers.reserve(n_target * 3);
@@ -98,10 +100,7 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
             std::vector<Walker> thread_walkers;
             std::vector<double> thread_walkers_local_energies;
 
-            thread_walkers.reserve(100);
-            thread_walkers_local_energies.reserve(100);
-
-#pragma omp for schedule(dynamic, 100) nowait
+#pragma omp for schedule(dynamic, 1000) nowait
             for (size_t i = 0; i < current_N; i++)
             {
                 Walker old_walker = walkers[i];
@@ -118,8 +117,8 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
                         continue;
                 }
 
-                double A = potential(old_walker, 0, Z);
-                double B = potential(new_walker, 0, Z);
+                double A = potential(old_walker, 0.00125, Z);
+                double B = potential(new_walker, 0.00125, Z);
 
                 double e_local = (A + B) / 2;
 
@@ -140,11 +139,9 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
 
                 temp_walkers.insert(temp_walkers.end(), thread_walkers.begin(), thread_walkers.end());
                 thread_walkers.clear();
-                thread_walkers.reserve(100);
 
                 local_energies.insert(local_energies.end(), thread_walkers_local_energies.begin(), thread_walkers_local_energies.end());
                 thread_walkers_local_energies.clear();
-                thread_walkers_local_energies.reserve(100);
             }
         }
 
@@ -179,6 +176,8 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
         {
             tmp_local_energies.push_back(average_local_energy);
             tmp_etrial_energies.push_back(e_trial);
+
+            sigma_file->write_numbers(std::vector<double>{current_time, Statistics::stddev(local_energies)});
 
             if (tmp_local_energies.size() == block_size)
             {
@@ -240,6 +239,7 @@ void simulate(double _tau = 0.01, double _sim_time = 100, size_t _n_target = 100
         stats_file->flush();
         block_energy_file->flush();
         block_etrial_file->flush();
+        sigma_file->flush();
 
         std::cout << "\nSimulation completed successfully. Data written to files.\n";
     }

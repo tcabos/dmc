@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-class alignas(32) Vec3
+struct alignas(32) Vec3
 {
 public:
     double x, y, z;
